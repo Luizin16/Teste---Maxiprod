@@ -1,0 +1,27 @@
+# .NET
+bin/
+obj/
+*.user
+.vs/
+TestResults/
+coverage/
+*.trx
+
+# Node / Playwright
+node_modules/
+dist/
+playwright-report/
+test-results/
+*.snap
+
+# Environment
+.env
+.env.local
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IMPORTANT: Never commit application source code
+ExameDesenvolvedorDeTestes/
+_AppSource/

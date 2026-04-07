@@ -1,0 +1,179 @@
+name: MinhasFinancas — Test Suite
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+
+env:
+  DOTNET_VERSION: '9.0.x'
+  NODE_VERSION: '20'
+
+jobs:
+  # ─────────────────────────────────────────────
+  # 1. Testes Unitários (xUnit)
+  # ─────────────────────────────────────────────
+  unit-tests:
+    name: 🧪 Unit Tests (.NET)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout tests repo
+        uses: actions/checkout@v4
+        with:
+          path: tests
+
+      - name: Checkout app repo (source under test)
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ secrets.APP_REPO }}   # Set in repo secrets
+          token: ${{ secrets.APP_REPO_TOKEN }}
+          path: ExameDesenvolvedorDeTestes
+
+      - name: Setup .NET ${{ env.DOTNET_VERSION }}
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+
+      - name: Restore dependencies
+        run: dotnet restore tests/unit/MinhasFinancas.Unit.Tests/MinhasFinancas.Unit.Tests.csproj
+
+      - name: Run unit tests
+        run: |
+          dotnet test tests/unit/MinhasFinancas.Unit.Tests/MinhasFinancas.Unit.Tests.csproj \
+            --configuration Release \
+            --logger "trx;LogFileName=unit-results.trx" \
+            --collect:"XPlat Code Coverage" \
+            --results-directory ./TestResults
+
+      - name: Upload unit test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: unit-test-results
+          path: TestResults/
+
+  # ─────────────────────────────────────────────
+  # 2. Testes de Integração (xUnit + InMemory)
+  # ─────────────────────────────────────────────
+  integration-tests:
+    name: 🔗 Integration Tests (.NET)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout tests repo
+        uses: actions/checkout@v4
+        with:
+          path: tests
+
+      - name: Checkout app repo
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ secrets.APP_REPO }}
+          token: ${{ secrets.APP_REPO_TOKEN }}
+          path: ExameDesenvolvedorDeTestes
+
+      - name: Setup .NET ${{ env.DOTNET_VERSION }}
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+
+      - name: Restore dependencies
+        run: dotnet restore tests/integration/MinhasFinancas.Integration.Tests/MinhasFinancas.Integration.Tests.csproj
+
+      - name: Run integration tests
+        run: |
+          dotnet test tests/integration/MinhasFinancas.Integration.Tests/MinhasFinancas.Integration.Tests.csproj \
+            --configuration Release \
+            --logger "trx;LogFileName=integration-results.trx" \
+            --results-directory ./TestResults
+
+      - name: Upload integration test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: integration-test-results
+          path: TestResults/
+
+  # ─────────────────────────────────────────────
+  # 3. Testes E2E (Playwright)
+  # ─────────────────────────────────────────────
+  e2e-tests:
+    name: 🎭 E2E Tests (Playwright)
+    runs-on: ubuntu-latest
+    needs: [unit-tests, integration-tests]
+
+    steps:
+      - name: Checkout tests repo
+        uses: actions/checkout@v4
+        with:
+          path: tests
+
+      - name: Checkout app repo
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ secrets.APP_REPO }}
+          token: ${{ secrets.APP_REPO_TOKEN }}
+          path: ExameDesenvolvedorDeTestes
+
+      - name: Setup Node.js ${{ env.NODE_VERSION }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Setup .NET ${{ env.DOTNET_VERSION }}
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+
+      - name: Install Playwright dependencies
+        run: |
+          cd tests/e2e
+          npm ci
+          npx playwright install chromium --with-deps
+
+      - name: Start API (background)
+        run: |
+          cd ExameDesenvolvedorDeTestes/api/MinhasFinancas.API
+          dotnet run --urls http://0.0.0.0:5000 &
+          echo "Waiting for API to start..."
+          timeout 60 bash -c 'until curl -sf http://localhost:5000/swagger/index.html; do sleep 2; done'
+
+      - name: Install frontend dependencies and start dev server
+        run: |
+          cd ExameDesenvolvedorDeTestes/web
+          npm install -g bun
+          bun install
+          bunx vite --port 5173 &
+          echo "Waiting for frontend to start..."
+          timeout 60 bash -c 'until curl -sf http://localhost:5173; do sleep 2; done'
+
+      - name: Run Playwright tests
+        run: |
+          cd tests/e2e
+          npx playwright test
+
+      - name: Upload Playwright report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: tests/e2e/playwright-report/
+          retention-days: 30
+
+  # ─────────────────────────────────────────────
+  # Summary
+  # ─────────────────────────────────────────────
+  test-summary:
+    name: 📊 Test Summary
+    runs-on: ubuntu-latest
+    needs: [unit-tests, integration-tests, e2e-tests]
+    if: always()
+
+    steps:
+      - name: Check results
+        run: |
+          echo "Unit Tests:        ${{ needs.unit-tests.result }}"
+          echo "Integration Tests: ${{ needs.integration-tests.result }}"
+          echo "E2E Tests:         ${{ needs.e2e-tests.result }}"
